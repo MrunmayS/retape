@@ -11,6 +11,7 @@ import json
 from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Literal
 
@@ -137,9 +138,12 @@ def load_client(path: str | Path) -> Client:
 def load_offer(path: str | Path) -> Offer:
     raw = json.loads(Path(path).read_text())
     fpd = raw.get("first_payment_date")
+    balance_cents = raw.get("creditor_balance_cents", raw.get("current_balance_cents"))
+    if balance_cents is None:
+        raise KeyError("offer must include creditor_balance_cents")
     return Offer(
         creditor=raw["creditor"],
-        current_balance_cents=int(raw["current_balance_cents"]),
+        current_balance_cents=int(balance_cents),
         original_balance_cents=int(raw["original_balance_cents"]),
         settlement_pct=float(raw["settlement_pct"]),
         first_payment_date=_d(fpd) if fpd else None,
@@ -172,8 +176,14 @@ def load_case(case_dir: str | Path) -> tuple[Client, Offer, CreditorRules]:
 
 
 def offer_total_cents(offer: Offer) -> int:
-    return round(offer.settlement_pct * offer.current_balance_cents)
+    return int(
+        (Decimal(str(offer.settlement_pct)) * Decimal(offer.current_balance_cents))
+        .quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
 
 
 def program_fee_cents(offer: Offer, rules: CreditorRules) -> int:
-    return round(rules.program_fee_pct * offer.original_balance_cents)
+    return int(
+        (Decimal(str(rules.program_fee_pct)) * Decimal(offer.original_balance_cents))
+        .quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
